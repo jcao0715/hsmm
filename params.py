@@ -1,5 +1,4 @@
 import numpy as np
-import torch
 
 lengthFirstExons=np.load('scfg-params/lengthFirstExons.npy')
 lengthIntrons=np.load('scfg-params/lengthIntrons.npy')

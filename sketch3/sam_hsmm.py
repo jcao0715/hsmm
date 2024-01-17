@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import params
 import tqdm.auto as tqdm
 from collections import deque
+from modular_splicing.models_for_testing.list import LSSI
+from modular_splicing.dataset.h5_dataset import H5Dataset
 
 # 0=S, 1=Es, 2=Ef, 3=Em, 4=El, 5=I, 6=5', 7=3', 8=epsilon
 states = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8])
@@ -28,10 +30,52 @@ Duration[6, 0] = 1
 Duration[7, 0] = 1
 Duration[-1, 0] = 1
 
-q3 = torch.tensor([[1], [0], [0]]).repeat(1, 1200) # [[null],[5'],[3']]
-q3[:, 460] = torch.tensor([0, 1, 0]) # 5' site
-q3[:, 572] = torch.tensor([0, 0, 1]) # 3' site
-q3[:, 590] = torch.tensor([0.4, 0.6, 0]) # 5' site
+# q3 = torch.tensor([[1], [0], [0]]).repeat(1, 1200) # [[null],[5'],[3']]
+# q3[:, 460] = torch.tensor([0, 1, 0]) # 5' site
+# q3[:, 572] = torch.tensor([0, 0, 1]) # 3' site
+# q3[:, 590] = torch.tensor([0.4, 0.6, 0]) # 5' site
+# q = torch.zeros(9, q3.shape[1])
+# q[1:6] = q3[0, :]
+# q[6] = q3[1, :]
+# q[7] = q3[2, :]
+# start = torch.zeros(9, 1)
+# start[0] = 1.0
+# end = torch.zeros(9, 1)
+# end[-1] = 1.0
+# q = torch.cat((start, q, end), dim=1)
+
+acceptor, donor = [x.model.eval() for x in LSSI]
+acceptor.conv_layers[0].clipping = "none"
+donor.conv_layers[0].clipping = "none"
+data_path = "/mnt/md0/ExpeditionsCommon/spliceai/Canonical/dataset_train_all.h5"
+# dataset = genome
+data = H5Dataset(
+            path=data_path,
+            cl=400,
+            # **dataset_kwargs,
+            cl_max=10_000,
+            sl=5000,
+            iterator_spec=dict(type="FastIter", shuffler_spec=dict(type="DoNotShuffle")),
+            datapoint_extractor_spec=dict(type="BasicDatapointExtractor"),
+            post_processor_spec=dict(type="IdentityPostProcessor"),
+            )
+
+clip = 200 # x starts and ends with padding
+# remove window of overlap to concatenate
+
+for datapoint in data:
+    x, y = datapoint["inputs"]["x"], datapoint["outputs"]["y"]
+    # x is one-hot encoded, 5400 by 4 (acgt)
+    # 0 acceptor, 2 donor
+    # predicts locations of acceptors (yp_acc = q matrix)
+
+# yp_acc can be treated as col in q matrix
+    
+yp_acc = acceptor(torch.tensor(x[None]).float().cuda()).log_softmax(-1)[0,clip:-clip,1].detach().cpu().numpy()
+yp_don = donor(torch.tensor(x[None]).float().cuda()).log_softmax(-1)[0,clip:-clip,2].detach().cpu().numpy()
+yp_null = 1 - yp_acc - yp_don
+
+q3 = torch.stack([yp_null, yp_acc, yp_don], dim=0)
 q = torch.zeros(9, q3.shape[1])
 q[1:6] = q3[0, :]
 q[6] = q3[1, :]
